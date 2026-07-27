@@ -1,0 +1,8 @@
+[package]
+name = "ngix-parser-sample"
+authors = ["asobi"]
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+winnow = "1.0.4"
