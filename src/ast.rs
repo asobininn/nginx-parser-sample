@@ -2,7 +2,7 @@ use std::{borrow::Cow, ops::Range};
 
 use la_arena::{Arena, Idx};
 
-pub type Span = Range<u32>;
+pub type Span = Range<usize>;
 pub type DirectiveId<'s> = Idx<Directive<'s>>;
 
 #[derive(Debug, Clone)]
@@ -40,7 +40,6 @@ pub struct ConfigAst<'s> {
 }
 
 impl<'s> ConfigAst<'s> {
-    // パンくずを作るのに使う
     pub fn ancestors(&self, directive: DirectiveId<'s>) -> impl Iterator<Item = DirectiveId<'s>> {
         let mut current = self.directives[directive].parent;
         std::iter::from_fn(move || {
