@@ -19,7 +19,7 @@ impl SyntaxError {
         let offset = error.offset();
         let found = source.get(offset..).and_then(|rest| rest.chars().next());
         let end = found.map(|c| offset + c.len_utf8()).unwrap_or(offset);
-        let contexts = error.inner().context().cloned().collect();
+        let contexts = error.inner().context.context().cloned().collect();
         Self {
             span: offset..end,
             found,

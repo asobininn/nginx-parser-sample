@@ -2,7 +2,10 @@ use winnow::error::ContextError;
 
 use crate::ast::Span;
 
-pub type ParseContextError = ContextError<ParseContext>;
+pub struct ParseContextError {
+    pub span: Span,
+    pub context: ContextError<ParseContext>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseContext {
