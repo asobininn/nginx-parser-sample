@@ -27,6 +27,17 @@ impl SyntaxError {
         }
     }
 
+    pub fn from_context(source: &str, error: ParseContextError) -> Self {
+        let offset = error.span.start;
+        let found = source[offset..].chars().next();
+        let end = found.map(|c| offset + c.len_utf8()).unwrap_or(offset);
+        Self {
+            span: offset..end,
+            found,
+            contexts: error.context.context().cloned().collect(),
+        }
+    }
+
     pub fn message(&self, source: &str) -> String {
         if self.expects(Expected::EscapeSequence) {
             return match self.found {

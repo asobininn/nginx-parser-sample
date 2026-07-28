@@ -2,6 +2,7 @@ use winnow::error::ContextError;
 
 use crate::ast::Span;
 
+#[derive(Debug, Clone)]
 pub struct ParseContextError {
     pub span: Span,
     pub context: ContextError<ParseContext>,
@@ -10,9 +11,9 @@ pub struct ParseContextError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseContext {
     Expected(Expected),
-    InDirective {
-        name_span: Span,
-    },
+    // InDirective {
+        // name_span: Span,
+    // },
     InBlock {
         name_span: Span,
         open_brace_span: Span,
