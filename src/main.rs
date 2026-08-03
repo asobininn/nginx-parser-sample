@@ -2,6 +2,4 @@ mod ast;
 mod error;
 mod parser;
 
-fn main() {
-    println!("Hello, world!");
-}
+fn main() {}

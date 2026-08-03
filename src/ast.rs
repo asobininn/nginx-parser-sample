@@ -6,12 +6,6 @@ pub type Span = Range<usize>;
 pub type DirectiveId<'s> = Idx<Directive<'s>>;
 
 #[derive(Debug, Clone)]
-pub enum TokenSpan {
-    Present(Span),
-    Missing { expected_at: usize },
-}
-
-#[derive(Debug, Clone)]
 pub struct Directive<'s> {
     pub header: DirectiveHeader<'s>,
     pub kind: DirectiveKind<'s>,
@@ -36,12 +30,12 @@ pub struct Arg<'s> {
 #[derive(Debug, Clone)]
 pub enum DirectiveKind<'s> {
     Simple {
-        semicolon_span: TokenSpan,
+        semicolon_span: Span,
     },
     Block {
-        directives: Vec<DirectiveId<'s>>,
+        children: Vec<DirectiveId<'s>>,
         open_brace_span: Span,
-        close_brace_span: TokenSpan,
+        close_brace_span: Span,
     },
 }
 
@@ -52,6 +46,21 @@ pub struct ConfigAst<'s> {
 }
 
 impl<'s> ConfigAst<'s> {
+    pub fn link_parents(&mut self) {
+        for root in self.roots.clone() {
+            self.link_children(root);
+        }
+    }
+
+    fn link_children(&mut self, id: DirectiveId<'s>) {
+        if let DirectiveKind::Block { children, .. } = &self.directives[id].kind {
+            for child in children.clone() {
+                self.directives[child].parent = Some(id);
+                self.link_children(child);
+            }
+        }
+    }
+
     pub fn ancestors(
         &self,
         directive: DirectiveId<'s>,

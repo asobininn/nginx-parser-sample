@@ -11,9 +11,6 @@ pub struct ParseContextError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseContext {
     Expected(Expected),
-    // InDirective {
-        // name_span: Span,
-    // },
     InBlock {
         name_span: Span,
         open_brace_span: Span,

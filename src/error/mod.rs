@@ -1,4 +1,4 @@
-use winnow::error::ParseError as WinnowParseError;
+use winnow::error::ErrMode;
 
 use crate::{
     ast::Span,
@@ -15,15 +15,14 @@ pub struct SyntaxError {
 }
 
 impl SyntaxError {
-    pub fn from_winnow<I>(source: &str, error: &WinnowParseError<I, ParseContextError>) -> Self {
-        let offset = error.offset();
-        let found = source.get(offset..).and_then(|rest| rest.chars().next());
-        let end = found.map(|c| offset + c.len_utf8()).unwrap_or(offset);
-        let contexts = error.inner().context.context().cloned().collect();
-        Self {
-            span: offset..end,
-            found,
-            contexts,
+    pub fn from_err_mode(source: &str, mode: ErrMode<ParseContextError>) -> Self {
+        match mode {
+            ErrMode::Backtrack(error) | ErrMode::Cut(error) => Self::from_context(source, error),
+            ErrMode::Incomplete(_) => Self {
+                span: source.len()..(source.len()),
+                found: None,
+                contexts: Vec::new(),
+            },
         }
     }
 
