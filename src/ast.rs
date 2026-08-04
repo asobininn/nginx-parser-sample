@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::{borrow::Cow, ops::Range};
 
 use la_arena::{Arena, Idx};
@@ -59,17 +61,5 @@ impl<'s> ConfigAst<'s> {
                 self.link_children(child);
             }
         }
-    }
-
-    pub fn ancestors(
-        &self,
-        directive: DirectiveId<'s>,
-    ) -> impl Iterator<Item = DirectiveId<'s>> + '_ {
-        let mut current = self.directives[directive].parent;
-        std::iter::from_fn(move || {
-            let next = current;
-            current = next.and_then(|id| self.directives[id].parent);
-            next
-        })
     }
 }

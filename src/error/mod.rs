@@ -1,3 +1,4 @@
+use codespan_reporting::diagnostic::{Diagnostic, Label};
 use winnow::error::ErrMode;
 
 use crate::{
@@ -38,30 +39,31 @@ impl SyntaxError {
     }
 
     pub fn message(&self, source: &str) -> String {
-        if self.expects(Expected::EscapeSequence) {
-            return match self.found {
-                Some(found) => format!("不正なエスケープ文字 `{found}`"),
-                None => "エスケープの途中で入力が終わっている".to_string(),
-            };
-        } else if self.found.is_none() && self.expects_closing_quote() {
-            if let Some((quote, _)) = self.quoted_arg_ctx() {
-                return format!("`{}` で始まった文字列が閉じられていない", quote.as_char());
-            }
-            return "クォートが閉じられていない".to_string();
-        } else if self.found.is_none() && self.expects(Expected::ClosingBrace) {
-            if let Some((name_span, _)) = self.block_ctx() {
-                let name = Self::source_text(source, name_span);
-                return format!("`{name}` ブロックが閉じられていない");
-            }
-            return "ブロックが閉じられていない".to_string();
-        } else if self.found == Some('}') && self.expects(Expected::DirectiveName) {
-            return "対応する `{` のない `}` がある".to_string();
-        } else if self.expects(Expected::DirectiveName) {
-            return "ディレクティブ名が必要".to_string();
-        } else if self.expects(Expected::DirectiveTerminator) {
-            return "`;` または `{` が必要".to_string();
-        }
         match self.found {
+            Some(found) if self.expects(Expected::EscapeSequence) => {
+                format!("不正なエスケープ文字 `{found}`")
+            }
+            None if self.expects(Expected::EscapeSequence) => {
+                "エスケープの途中で入力が終わっている".to_string()
+            }
+            None if self.expects_closing_quote() => match self.quoted_arg_ctx() {
+                Some((quote, _)) => {
+                    format!("`{}` で始まった文字列が閉じられていない", quote.as_char())
+                }
+                None => "クォートが閉じられていない".to_string(),
+            },
+            None if self.expects(Expected::ClosingBrace) => match self.block_ctx() {
+                Some((name_span, _)) => {
+                    let name = Self::source_text(source, name_span);
+                    format!("`{name}` ブロックが閉じられていない")
+                }
+                None => "ブロックが閉じられていない".to_string(),
+            },
+            Some('}') if self.expects(Expected::DirectiveName) => {
+                "対応する `{` のない `}` がある".to_string()
+            }
+            _ if self.expects(Expected::DirectiveName) => "ディレクティブ名が必要".to_string(),
+            _ if self.expects(Expected::DirectiveTerminator) => "`;` または `{` が必要".to_string(),
             Some(found) => {
                 format!("予期しない文字 `{found}`")
             }
@@ -108,5 +110,59 @@ impl SyntaxError {
         &source[span.start..span.end]
     }
 
-    // TODO: to_diagnostic
+    pub fn to_diagnostic<FileId: Copy>(&self, file_id: FileId, source: &str) -> Diagnostic<FileId> {
+        let mut labels = vec![
+            Label::primary(file_id, self.span.clone()).with_message(self.primary_label_message()),
+        ];
+
+        // クォート開始位置を補助表示する
+        if self.expects_closing_quote() || self.expects(Expected::EscapeSequence) {
+            if let Some((quote, open_quote_span)) = self.quoted_arg_ctx() {
+                labels.push(
+                    Label::secondary(file_id, open_quote_span.clone()).with_message(format!(
+                        "この `{}` から文字列が始まっている",
+                        quote.as_char()
+                    )),
+                );
+            }
+        }
+        // ブロック開始位置を補助表示する
+        if self.expects(Expected::ClosingBrace) {
+            if let Some((name_span, open_brace_span)) = self.block_ctx() {
+                let name = Self::source_text(source, name_span);
+                labels.push(
+                    Label::secondary(file_id, open_brace_span.clone())
+                        .with_message(format!("`{name}` ブロックはここで開始した")),
+                );
+            }
+        }
+
+        Diagnostic::error()
+            .with_message(self.message(source))
+            .with_labels(labels)
+    }
+
+    fn primary_label_message(&self) -> String {
+        match self.found {
+            Some(found) if self.expects(Expected::EscapeSequence) => {
+                format!("`{found}` はここではエスケープできない")
+            }
+            None if self.expects(Expected::EscapeSequence) => {
+                "エスケープする文字が必要".to_string()
+            }
+            None if self.expects_closing_quote() => "ここに閉じクォートが必要".to_string(),
+            None if self.expects(Expected::ClosingBrace) => "ここに `}` が必要".to_string(),
+            Some('}') if self.expects(Expected::DirectiveName) => {
+                "この `}` に対応する `{` がない".to_string()
+            }
+            _ if self.expects(Expected::DirectiveName) => {
+                "ここにディレクティブ名が必要".to_string()
+            }
+            _ if self.expects(Expected::DirectiveTerminator) => {
+                "ディレクティブを `;` で終えるか `{` でブロックを始める".to_string()
+            }
+            Some(_) => "予期しない入力".to_string(),
+            None => "ここで入力が終わっている".to_string(),
+        }
+    }
 }

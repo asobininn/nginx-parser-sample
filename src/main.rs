@@ -1,3 +1,11 @@
+use codespan_reporting::{
+    files::SimpleFiles,
+    term::{
+        self,
+        termcolor::{ColorChoice, StandardStream},
+    },
+};
+
 use crate::parser::parse;
 
 mod ast;
@@ -5,14 +13,17 @@ mod error;
 mod parser;
 
 fn check(label: &str, source: &str) {
+    let mut files = SimpleFiles::new();
+    let file_id = files.add(label, source);
+
     println!("=== {label} ===");
-    println!("source: {source:?}");
     match parse(source) {
         Ok(ast) => println!("OK: roots={}", ast.roots.len()),
         Err(err) => {
-            println!("span={:?} found={:?}", err.span, err.found);
-            println!("contexts={:?}", err.contexts);
-            println!("message: {}", err.message(source));
+            let diagnostic = err.to_diagnostic(file_id, source);
+            let writer = StandardStream::stderr(ColorChoice::Auto);
+            let config = term::Config::default();
+            term::emit_to_write_style(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
         }
     }
     println!();
@@ -30,4 +41,5 @@ fn main() {
     check("不正なエスケープ", r#"server_name "foo\qbar";"#);
     check("ディレクティブ名なし(先頭がいきなり;)", "; listen 80;");
     check("ブロック名の後に閉じ忘れ", "http { server { listen 80; }");
+    check("sample", r#"http { server { listen 80;"#);
 }
