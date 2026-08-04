@@ -3,9 +3,9 @@ use std::borrow::Cow;
 use la_arena::Arena;
 use winnow::{
     LocatingSlice, ModalResult, Parser, Stateful,
-    ascii::{escaped, multispace0, multispace1},
+    ascii::{escaped, multispace1},
     combinator::{alt, cut_err, eof, peek, preceded, repeat, terminated},
-    error::{AddContext, ContextError, ParserError},
+    error::{AddContext, ContextError, ErrMode, ParserError},
     seq,
     stream::Location,
     token::take_while,
@@ -68,7 +68,14 @@ pub fn parse(source: &str) -> Result<ConfigAst<'_>, SyntaxError> {
 }
 
 fn config<'s>(input: &mut Input<'s>) -> PResult<Vec<DirectiveId<'s>>> {
-    preceded(ws0, terminated(directives, eof)).parse_next(input)
+    preceded(
+        ws0,
+        terminated(
+            directives,
+            eof.context(ParseContext::Expected(Expected::DirectiveName)),
+        ),
+    )
+    .parse_next(input)
 }
 
 fn directives<'s>(input: &mut Input<'s>) -> PResult<Vec<DirectiveId<'s>>> {
@@ -76,64 +83,86 @@ fn directives<'s>(input: &mut Input<'s>) -> PResult<Vec<DirectiveId<'s>>> {
 }
 
 fn directive<'s>(input: &mut Input<'s>) -> PResult<DirectiveId<'s>> {
-    // alt((block_directive, simple_directive)).parse_next(input)
-    preceded(
-        peek(directive_name),
-        cut_err(alt((block_directive, simple_directive))),
-    )
-    .parse_next(input)
-}
-
-fn block_directive<'s>(input: &mut Input<'s>) -> PResult<DirectiveId<'s>> {
     let start = input.current_token_start();
-    let (header, open_brace_span) = seq!(directive_header, _: ws0, '{'.span()).parse_next(input)?;
-    let name_span = header.name_span.clone();
-    let (children, close_brace_span) = seq! {
-        _: ws0,
-        directives,
-        '}'
-            .span()
-            .context(ParseContext::Expected(Expected::ClosingBrace)),
+    let header = directive_header.parse_next(input)?;
+    hws0.parse_next(input)?;
+
+    match peek(winnow::token::any::<Input<'s>, ParseContextError>).parse_next(input) {
+        Ok('{') => cut_err(block_body(header, start)).parse_next(input),
+        Ok(';') => cut_err(simple_body(header, start)).parse_next(input),
+        _ => Err(ErrMode::Cut(ParseContextError {
+            span: {
+                let offset = input.current_token_start();
+                offset..offset
+            },
+            context: {
+                let mut ctx = ContextError::new();
+                ctx.push(ParseContext::Expected(Expected::DirectiveTerminator));
+                ctx
+            },
+        })),
     }
-    .context(ParseContext::InBlock {
-        name_span,
-        open_brace_span: open_brace_span.clone(),
-    })
-    .parse_next(input)?;
-
-    let end = input.current_token_start();
-
-    let directive = Directive {
-        header,
-        kind: DirectiveKind::Block {
-            children,
-            open_brace_span,
-            close_brace_span,
-        },
-        parent: None,
-        span: start..end,
-    };
-    Ok(input.state.alloc(directive))
 }
 
-fn simple_directive<'s>(input: &mut Input<'s>) -> PResult<DirectiveId<'s>> {
-    let ((header, semicolon_span), span) = seq!(directive_header,
-        _: ws0,
-        ';'.span().context(ParseContext::Expected(Expected::DirectiveTerminator))
-    )
-    .with_span()
-    .parse_next(input)?;
-    let directive = Directive {
-        header,
-        kind: DirectiveKind::Simple { semicolon_span },
-        parent: None,
-        span,
-    };
-    Ok(input.state.alloc(directive))
+fn block_body<'s>(
+    header: DirectiveHeader<'s>,
+    start: usize,
+) -> impl FnMut(&mut Input<'s>) -> PResult<DirectiveId<'s>> {
+    move |input: &mut Input<'s>| {
+        let header = header.clone();
+        let name_span = header.name_span.clone();
+        let open_brace_span = '{'.span().parse_next(input)?;
+        let (children, close_brace_span) = seq! {
+            _: ws0,
+            directives,
+            '}'
+                .span()
+                .context(ParseContext::Expected(Expected::ClosingBrace)),
+        }
+        .context(ParseContext::InBlock {
+            name_span,
+            open_brace_span: open_brace_span.clone(),
+        })
+        .parse_next(input)?;
+
+        let end = input.current_token_start();
+        let directive = Directive {
+            header,
+            kind: DirectiveKind::Block {
+                children,
+                open_brace_span,
+                close_brace_span,
+            },
+            parent: None,
+            span: start..end,
+        };
+        Ok(input.state.alloc(directive))
+    }
+}
+
+fn simple_body<'s>(
+    header: DirectiveHeader<'s>,
+    start: usize,
+) -> impl FnMut(&mut Input<'s>) -> PResult<DirectiveId<'s>> {
+    move |input: &mut Input<'s>| {
+        let header = header.clone();
+        let semicolon_span = ';'
+            .span()
+            .context(ParseContext::Expected(Expected::DirectiveTerminator))
+            .parse_next(input)?;
+        let end = input.current_token_start();
+        let directive = Directive {
+            header,
+            kind: DirectiveKind::Simple { semicolon_span },
+            parent: None,
+            span: start..end,
+        };
+        Ok(input.state.alloc(directive))
+    }
 }
 
 fn directive_header<'s>(input: &mut Input<'s>) -> PResult<DirectiveHeader<'s>> {
-    seq!(directive_name, repeat(0.., preceded(ws1, arg)),)
+    seq!(directive_name, repeat(0.., preceded(hws1, arg)),)
         .with_span()
         .map(|((name, args), span)| DirectiveHeader {
             name: name.0,
@@ -208,12 +237,26 @@ fn bare_arg<'s>(input: &mut Input<'s>) -> PResult<Arg<'s>> {
     .parse_next(input)
 }
 
-fn ws0(input: &mut Input<'_>) -> PResult<()> {
-    multispace0.void().parse_next(input)
+fn line_comment(input: &mut Input<'_>) -> PResult<()> {
+    preceded('#', take_while(0.., |c: char| !matches!(c, '\r' | '\n')))
+        .void()
+        .parse_next(input)
 }
 
-fn ws1(input: &mut Input<'_>) -> PResult<()> {
-    multispace1.void().parse_next(input)
+fn hws0(input: &mut Input<'_>) -> PResult<()> {
+    take_while(0.., |c: char| matches!(c, ' ' | '\t'))
+        .void()
+        .parse_next(input)
+}
+
+fn hws1(input: &mut Input<'_>) -> PResult<()> {
+    take_while(1.., |c: char| matches!(c, ' ' | '\t'))
+        .void()
+        .parse_next(input)
+}
+
+fn ws0(input: &mut Input<'_>) -> PResult<()> {
+    repeat(0.., alt((multispace1.void(), line_comment))).parse_next(input)
 }
 
 #[cfg(test)]
