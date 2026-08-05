@@ -1,5 +1,5 @@
 [package]
-name = "ngix-parser-sample"
+name = "nginx-parser-sample"
 authors = ["asobi"]
 version = "0.1.0"
 edition = "2024"
