@@ -8,3 +8,6 @@ edition = "2024"
 codespan-reporting = "0.13"
 la-arena = "0.3"
 winnow = "1"
+
+[dev-dependencies]
+proptest = "1.11"

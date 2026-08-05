@@ -44,3 +44,12 @@ impl QuoteKind {
         }
     }
 }
+
+impl From<char> for QuoteKind {
+    fn from(value: char) -> Self {
+        match value {
+            '\'' => QuoteKind::Single,
+            _ => QuoteKind::Double,
+        }
+    }
+}
