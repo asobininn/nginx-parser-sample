@@ -1,29 +1,141 @@
+use std::ops::Range;
+
 use proptest::prelude::*;
 
-use crate::parser::parse;
+#[derive(Debug, Clone)]
+pub(crate) struct Generated {
+    pub(crate) source: String,
+    pub(crate) mutation_sites: Vec<MutationSite>,
+}
 
-proptest! {
-    #[test]
-    fn generated_config_can_be_parsed(source in config()) {
-        if let Err(error) = parse(&source) {
-            prop_assert!(false, "生成された有効なconfigのパースに失敗した:\n{source}\n\n{error:#?}")
+impl Generated {
+    fn new(source: String, mutation_sites: Vec<MutationSite>) -> Self {
+        Self {
+            source,
+            mutation_sites,
+        }
+    }
+
+    fn plain(source: String) -> Self {
+        Self::new(source, Vec::new())
+    }
+
+    fn push_str(&mut self, source: &str) {
+        self.source.push_str(source);
+    }
+
+    fn push_mutable(&mut self, token: char, kind: MutationKind) {
+        let start = self.source.len();
+        self.source.push(token);
+
+        self.mutation_sites
+            .push(MutationSite::new(start..self.source.len(), kind));
+    }
+
+    fn append(&mut self, mut other: Generated) {
+        let offset = self.source.len();
+
+        for site in &mut other.mutation_sites {
+            site.span.start += offset;
+            site.span.end += offset;
+        }
+        self.source.push_str(&other.source);
+        self.mutation_sites.extend(other.mutation_sites);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MutationSite {
+    pub(crate) span: Range<usize>,
+    pub(crate) kind: MutationKind,
+}
+
+impl MutationSite {
+    fn new(span: Range<usize>, kind: MutationKind) -> Self {
+        MutationSite { span, kind }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MutationKind {
+    Semicolon,
+    OpeningBrace,
+    ClosingBrace,
+    OpeningQuote(char),
+    ClosingQuote(char),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Mutated {
+    pub(crate) original: String,
+    pub(crate) source: String,
+    pub(crate) site: MutationSite,
+}
+
+pub(crate) fn mutated_config() -> impl Strategy<Value = Mutated> {
+    config()
+        .prop_map(|generated| {
+            let candidates = generated
+                .mutation_sites
+                .iter()
+                .filter(|site| can_mutate(&generated.source, site))
+                .cloned()
+                .collect::<Vec<_>>();
+            (generated, candidates)
+        })
+        .prop_filter(
+            "config must contain an applicable mutation site",
+            |(_, canadidates)| !canadidates.is_empty(),
+        )
+        .prop_flat_map(|(generated, candidates)| {
+            let candidate_count = candidates.len();
+            (Just(generated), Just(candidates), 0..candidate_count).prop_map(
+                |(generated, candidates, idx)| {
+                    let site = candidates[idx].clone();
+                    let mut source = generated.source.clone();
+                    apply_mutation(&mut source, &site);
+                    Mutated {
+                        original: generated.source,
+                        source,
+                        site,
+                    }
+                },
+            )
+        })
+}
+
+fn apply_mutation(source: &mut String, site: &MutationSite) {
+    match site.kind {
+        MutationKind::Semicolon => source.replace_range(site.span.clone(), "\n"),
+        MutationKind::OpeningBrace
+        | MutationKind::ClosingBrace
+        | MutationKind::OpeningQuote(_)
+        | MutationKind::ClosingQuote(_) => {
+            source.replace_range(site.span.clone(), "");
         }
     }
 }
 
-fn config() -> impl Strategy<Value = String> {
+fn can_mutate(source: &str, site: &MutationSite) -> bool {
+    match site.kind {
+        MutationKind::ClosingQuote(quote) => !source[site.span.end..].chars().any(|c| c == quote),
+        _ => true,
+    }
+}
+
+pub(crate) fn config() -> impl Strategy<Value = Generated> {
     (ws0(), prop::collection::vec((directive(), ws0()), 0..6)).prop_map(|(leading, directives)| {
         directives
             .into_iter()
-            .fold(leading, |mut config, (directive, ws)| {
-                config.push_str(&directive);
+            .fold(Generated::plain(leading), |mut config, (directive, ws)| {
+                config.append(directive);
                 config.push_str(&ws);
                 config
             })
     })
 }
 
-fn directive() -> impl Strategy<Value = String> {
+fn directive() -> impl Strategy<Value = Generated> {
     simple_directive().prop_recursive(4, 64, 4, |directive| {
         (
             directive_header(),
@@ -31,33 +143,40 @@ fn directive() -> impl Strategy<Value = String> {
             ws0(),
             prop::collection::vec((directive, ws0()), 0..4),
         )
-            .prop_map(|(header, before_brace, after_brace, children)| {
-                let mut block = format!("{header}{before_brace}{{{after_brace}");
+            .prop_map(|(mut block, before_brace, after_brace, children)| {
+                block.push_str(&before_brace);
+                block.push_mutable('{', MutationKind::OpeningBrace);
+                block.push_str(&after_brace);
                 for (child, ws) in children {
-                    block.push_str(&child);
+                    block.append(child);
                     block.push_str(&ws);
                 }
-                block.push('}');
+                block.push_mutable('}', MutationKind::ClosingBrace);
                 block
             })
     })
 }
 
-fn simple_directive() -> impl Strategy<Value = String> {
-    (directive_header(), hws0()).prop_map(|(header, ws)| format!("{header}{ws};"))
+fn simple_directive() -> impl Strategy<Value = Generated> {
+    (directive_header(), hws0()).prop_map(|(mut generator, ws)| {
+        generator.push_str(&ws);
+        generator.push_mutable(';', MutationKind::Semicolon);
+        generator
+    })
 }
 
-fn directive_header() -> impl Strategy<Value = String> {
+fn directive_header() -> impl Strategy<Value = Generated> {
     (
         directive_name(),
         prop::collection::vec((hws1(), arg()), 0..5),
     )
         .prop_map(|(name, args)| {
-            args.into_iter().fold(name, |mut header, (ws, arg)| {
-                header.push_str(&ws);
-                header.push_str(&arg);
-                header
-            })
+            args.into_iter()
+                .fold(Generated::plain(name), |mut header, (ws, arg)| {
+                    header.push_str(&ws);
+                    header.append(arg);
+                    header
+                })
         })
 }
 
@@ -65,16 +184,21 @@ fn directive_name() -> impl Strategy<Value = String> {
     "[a-zA-Z0-9_]{1,10}"
 }
 
-fn arg() -> impl Strategy<Value = String> {
+fn arg() -> impl Strategy<Value = Generated> {
     prop_oneof![
-        3 => bare_arg(),
+        3 => bare_arg().prop_map(Generated::plain),
         1 => quoted_arg(),
     ]
 }
 
-fn quoted_arg() -> impl Strategy<Value = String> {
-    (prop_oneof![Just('\''), Just('"')], quoted_innner())
-        .prop_map(|(quote, inner)| format!("{quote}{inner}{quote}"))
+fn quoted_arg() -> impl Strategy<Value = Generated> {
+    (prop_oneof![Just('\''), Just('"')], quoted_innner()).prop_map(|(quote, inner)| {
+        let mut generated = Generated::plain(String::new());
+        generated.push_mutable(quote, MutationKind::OpeningQuote(quote));
+        generated.push_str(&inner);
+        generated.push_mutable(quote, MutationKind::ClosingQuote(quote));
+        generated
+    })
 }
 
 fn quoted_innner() -> impl Strategy<Value = String> {

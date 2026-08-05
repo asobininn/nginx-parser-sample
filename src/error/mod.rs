@@ -71,7 +71,7 @@ impl SyntaxError {
         }
     }
 
-    fn expects(&self, expected: Expected) -> bool {
+    pub(crate) fn expects(&self, expected: Expected) -> bool {
         self.contexts.iter().any(|ctx| {
             matches!(ctx,
                 ParseContext::Expected(actual)
@@ -80,13 +80,13 @@ impl SyntaxError {
         })
     }
 
-    fn expects_closing_quote(&self) -> bool {
+    pub(crate) fn expects_closing_quote(&self) -> bool {
         self.contexts
             .iter()
             .any(|ctx| matches!(ctx, ParseContext::Expected(Expected::ClosingQuote(_))))
     }
 
-    fn block_ctx(&self) -> Option<(&Span, &Span)> {
+    pub(crate) fn block_ctx(&self) -> Option<(&Span, &Span)> {
         self.contexts.iter().find_map(|ctx| match ctx {
             ParseContext::InBlock {
                 name_span,
@@ -96,7 +96,7 @@ impl SyntaxError {
         })
     }
 
-    fn quoted_arg_ctx(&self) -> Option<(QuoteKind, &Span)> {
+    pub(crate) fn quoted_arg_ctx(&self) -> Option<(QuoteKind, &Span)> {
         self.contexts.iter().find_map(|ctx| match ctx {
             ParseContext::InQuotedArgument {
                 quote,
