@@ -7,8 +7,8 @@ use la_arena::Arena;
 use winnow::{
     LocatingSlice, ModalResult, Parser, Stateful,
     ascii::{escaped, multispace1},
-    combinator::{alt, cut_err, eof, peek, preceded, repeat, terminated},
-    error::{AddContext, ContextError, ErrMode, ParserError},
+    combinator::{alt, cut_err, eof, fail, peek, preceded, repeat, terminated},
+    error::{AddContext, ContextError, ParserError},
     seq,
     stream::Location,
     token::take_while,
@@ -93,17 +93,8 @@ fn directive<'s>(input: &mut Input<'s>) -> PResult<DirectiveId<'s>> {
     match peek(winnow::token::any::<Input<'s>, ParseContextError>).parse_next(input) {
         Ok('{') => cut_err(block_body(header, start)).parse_next(input),
         Ok(';') => cut_err(simple_body(header, start)).parse_next(input),
-        _ => Err(ErrMode::Cut(ParseContextError {
-            span: {
-                let offset = input.current_token_start();
-                offset..offset
-            },
-            context: {
-                let mut ctx = ContextError::new();
-                ctx.push(ParseContext::Expected(Expected::DirectiveTerminator));
-                ctx
-            },
-        })),
+        _ => cut_err(fail.context(ParseContext::Expected(Expected::DirectiveTerminator)))
+            .parse_next(input),
     }
 }
 
