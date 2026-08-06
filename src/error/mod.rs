@@ -8,6 +8,19 @@ use crate::{
 
 pub mod context;
 
+#[derive(Clone, Copy)]
+enum ErrorKind {
+    InvalidEscape,
+    UnterminatedEscape,
+    UnterminatedQuote,
+    UnterminatedBlock,
+    UnmatchedCloseBrace,
+    MissingDirectiveName,
+    MissingTerminator,
+    Unexpected,
+    UnexpectedEof,
+}
+
 #[derive(Debug, Clone)]
 pub struct SyntaxError {
     pub span: Span,
@@ -38,36 +51,50 @@ impl SyntaxError {
         }
     }
 
-    pub fn message(&self, source: &str) -> String {
+    fn kind(&self) -> ErrorKind {
+        use ErrorKind::*;
+        use Expected::*;
         match self.found {
-            Some(found) if self.expects(Expected::EscapeSequence) => {
-                format!("不正なエスケープ文字 `{found}`")
+            Some(_) if self.expects(EscapeSequence) => InvalidEscape,
+            None if self.expects(EscapeSequence) => UnterminatedEscape,
+            None if self.expects_closing_quote() => UnterminatedQuote,
+            None if self.expects(ClosingBrace) => UnterminatedBlock,
+            Some('}') if self.expects(DirectiveName) => UnmatchedCloseBrace,
+            _ if self.expects(DirectiveName) => MissingDirectiveName,
+            _ if self.expects(DirectiveTerminator) => MissingTerminator,
+            Some(_) => Unexpected,
+            None => UnexpectedEof,
+        }
+    }
+
+    pub fn message(&self, source: &str) -> String {
+        use ErrorKind::*;
+        match self.kind() {
+            InvalidEscape => {
+                format!("不正なエスケープ文字 `{}`", self.found.unwrap())
             }
-            None if self.expects(Expected::EscapeSequence) => {
-                "エスケープの途中で入力が終わっている".to_string()
-            }
-            None if self.expects_closing_quote() => match self.quoted_arg_ctx() {
+            UnterminatedEscape => "エスケープの途中で入力が終わっている".to_string(),
+            UnterminatedQuote => match self.quoted_arg_ctx() {
                 Some((quote, _)) => {
                     format!("`{}` で始まった文字列が閉じられていない", quote.as_char())
                 }
                 None => "クォートが閉じられていない".to_string(),
             },
-            None if self.expects(Expected::ClosingBrace) => match self.block_ctx() {
+            UnterminatedBlock => match self.block_ctx() {
                 Some((name_span, _)) => {
                     let name = Self::source_text(source, name_span);
                     format!("`{name}` ブロックが閉じられていない")
                 }
                 None => "ブロックが閉じられていない".to_string(),
             },
-            Some('}') if self.expects(Expected::DirectiveName) => {
-                "対応する `{` のない `}` がある".to_string()
+            UnmatchedCloseBrace => "対応する `{` のない `}` がある".to_string(),
+            MissingDirectiveName => "ディレクティブ名が必要".to_string(),
+
+            MissingTerminator => "`;` または `{` が必要".to_string(),
+            Unexpected => {
+                format!("予期しない文字 `{}`", self.found.unwrap())
             }
-            _ if self.expects(Expected::DirectiveName) => "ディレクティブ名が必要".to_string(),
-            _ if self.expects(Expected::DirectiveTerminator) => "`;` または `{` が必要".to_string(),
-            Some(found) => {
-                format!("予期しない文字 `{found}`")
-            }
-            None => "入力が途中で終わっている".to_string(),
+            UnexpectedEof => "入力が途中で終わっている".to_string(),
         }
     }
 
@@ -143,26 +170,21 @@ impl SyntaxError {
     }
 
     fn primary_label_message(&self) -> String {
-        match self.found {
-            Some(found) if self.expects(Expected::EscapeSequence) => {
-                format!("`{found}` はここではエスケープできない")
+        use ErrorKind::*;
+        match self.kind() {
+            InvalidEscape => {
+                format!("`{}` はここではエスケープできない", self.found.unwrap())
             }
-            None if self.expects(Expected::EscapeSequence) => {
-                "エスケープする文字が必要".to_string()
-            }
-            None if self.expects_closing_quote() => "ここに閉じクォートが必要".to_string(),
-            None if self.expects(Expected::ClosingBrace) => "ここに `}` が必要".to_string(),
-            Some('}') if self.expects(Expected::DirectiveName) => {
-                "この `}` に対応する `{` がない".to_string()
-            }
-            _ if self.expects(Expected::DirectiveName) => {
-                "ここにディレクティブ名が必要".to_string()
-            }
-            _ if self.expects(Expected::DirectiveTerminator) => {
+            UnterminatedEscape => "エスケープする文字が必要".to_string(),
+            UnterminatedQuote => "ここに閉じクォートが必要".to_string(),
+            UnterminatedBlock => "ここに `}` が必要".to_string(),
+            UnmatchedCloseBrace => "この `}` に対応する `{` がない".to_string(),
+            MissingDirectiveName => "ここにディレクティブ名が必要".to_string(),
+            MissingTerminator => {
                 "ディレクティブを `;` で終えるか `{` でブロックを始める".to_string()
             }
-            Some(_) => "予期しない入力".to_string(),
-            None => "ここで入力が終わっている".to_string(),
+            Unexpected => "予期しない入力".to_string(),
+            UnexpectedEof => "ここで入力が終わっている".to_string(),
         }
     }
 }
