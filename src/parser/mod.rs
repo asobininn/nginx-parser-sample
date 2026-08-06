@@ -204,7 +204,7 @@ fn quoted_with<'s>(quote: char, input: &mut Input<'s>) -> PResult<Arg<'s>> {
         escaped(
             take_while(1.., |c: char| c != '\\' && c != quote),
             '\\',
-            alt(("\\".value("\\"), "\"".value("\"")))
+            alt(('\\'.value('\\'), quote.value(quote)))
                 .context(ParseContext::Expected(Expected::EscapeSequence)),
         ),
         quote.context(ParseContext::Expected(Expected::ClosingQuote(

@@ -78,7 +78,7 @@ pub(crate) fn mutated_config() -> impl Strategy<Value = Mutated> {
             let candidates = generated
                 .mutation_sites
                 .iter()
-                .filter(|site| can_mutate(&generated.source, site))
+                .filter(|site| can_mutate(&generated, site))
                 .cloned()
                 .collect::<Vec<_>>();
             (generated, candidates)
@@ -116,9 +116,17 @@ fn apply_mutation(source: &mut String, site: &MutationSite) {
     }
 }
 
-fn can_mutate(source: &str, site: &MutationSite) -> bool {
+fn can_mutate(generated: &Generated, site: &MutationSite) -> bool {
     match site.kind {
-        MutationKind::ClosingQuote(quote) => !source[site.span.end..].chars().any(|c| c == quote),
+        MutationKind::ClosingQuote(quote) => !generated.mutation_sites.iter().any(|later| {
+            later.span.start >= site.span.end
+                && matches!(
+                    later.kind,
+                    MutationKind::OpeningQuote(later_quote)
+                        | MutationKind::ClosingQuote(later_quote)
+                        if later_quote == quote
+                )
+        }),
         _ => true,
     }
 }
@@ -192,22 +200,23 @@ fn arg() -> impl Strategy<Value = Generated> {
 }
 
 fn quoted_arg() -> impl Strategy<Value = Generated> {
-    (prop_oneof![Just('\''), Just('"')], quoted_innner()).prop_map(|(quote, inner)| {
-        let mut generated = Generated::plain(String::new());
-        generated.push_mutable(quote, MutationKind::OpeningQuote(quote));
-        generated.push_str(&inner);
-        generated.push_mutable(quote, MutationKind::ClosingQuote(quote));
-        generated
+    prop_oneof![Just('\''), Just('"')].prop_flat_map(|quote| {
+        quoted_inner(quote).prop_map(move |inner| {
+            let mut generated = Generated::plain(String::new());
+            generated.push_mutable(quote, MutationKind::OpeningQuote(quote));
+            generated.push_str(&inner);
+            generated.push_mutable(quote, MutationKind::ClosingQuote(quote));
+            generated
+        })
     })
 }
 
-fn quoted_innner() -> impl Strategy<Value = String> {
+fn quoted_inner(quote: char) -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
             8 => "[a-zA-Z0-9 _./:-]{1,4}",
             1 => Just(r#"\\"#.to_string()),
-            1 => Just(r#"\""#.to_string()),
-
+            1 => Just(format!("\\{quote}")),
         ],
         0..5,
     )

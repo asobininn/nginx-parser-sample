@@ -24,9 +24,11 @@ fn is_expected_error_for(kind: MutationKind, error: &SyntaxError) -> bool {
         MutationKind::OpeningQuote(quote) => {
             error.expects(Expected::DirectiveTerminator)
                 || error.expects(Expected::ClosingQuote(QuoteKind::from(quote)))
+                || (error.found.is_some() && error.expects(Expected::EscapeSequence))
         }
         MutationKind::ClosingQuote(quote) => {
             error.expects(Expected::ClosingQuote(QuoteKind::from(quote)))
+                || (error.found.is_some() && error.expects(Expected::EscapeSequence))
         }
     }
 }
