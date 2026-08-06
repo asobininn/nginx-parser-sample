@@ -38,7 +38,13 @@ proptest! {
     fn generated_config_can_be_parsed(generated in config()) {
         let source = generated.source;
         if let Err(error) = parse(&source) {
-            prop_assert!(false, "生成された有効なconfigのパースに失敗した:\n{source}\n\n{error:#?}", )
+            prop_assert!(false,
+                "generated config failed to parse\n\n\
+                --- source ---\n\
+                {source}\n\
+                --- error ---\n\
+                {error:#?}\n"
+            );
         }
     }
 
@@ -47,7 +53,16 @@ proptest! {
         for site in &generated.mutation_sites {
             prop_assert!(
                 generated.source.get(site.span.clone()).is_some(),
-                "invalid mutation span: {:?}\nsorce:\n{}", site.span, generated.source,
+                "mutation span is outside the generated source\n\
+                \n\
+                span: {:?}\n\
+                source length: {}\n\
+                \n
+                --- source ---\n\
+                {}\n",
+                site.span,
+                generated.source.len(),
+                generated.source,
             );
         }
     }
@@ -57,19 +72,24 @@ proptest! {
         let res = parse(&case.source);
 
         prop_assert!(res.is_err(),
-            "変異したconfigが受理された:\n\
-            mutation: {:?}\n\
-            original:\n{}\n\n\
-            mutated:\n{}",
+            "mutated config was accepted\n\n\
+            mutation: {:?}\n\n\
+            --- original source ---\n\
+            {}\n\
+            --- mutated source ---\n\
+            {}\n",
             case.site.kind, case.original, case.source
         );
         let error = res.unwrap_err();
         prop_assert!(
             is_expected_error_for(case.site.kind, &error),
-            "変異に対応しないエラー:\n\
+            "mutation produced an unexpected error:\n\
             mutation: {:?}\n\
-            source:\n{}\n\n\
-            error:\n{error:#?}",
+            \n\
+            --- mutated source ---\n\
+            {}\n
+            --- actual error --- \n\
+            {error:#?}",
             case.site.kind,
             case.source,
         );

@@ -70,31 +70,29 @@ impl SyntaxError {
     pub fn message(&self, source: &str) -> String {
         use ErrorKind::*;
         match self.kind() {
-            InvalidEscape => {
-                format!("不正なエスケープ文字 `{}`", self.found.unwrap())
-            }
-            UnterminatedEscape => "エスケープの途中で入力が終わっている".to_string(),
+            InvalidEscape => "invalid escape sequence".to_string(),
+            UnterminatedEscape => "unterminated escape sequence".to_string(),
             UnterminatedQuote => match self.quoted_arg_ctx() {
                 Some((quote, _)) => {
-                    format!("`{}` で始まった文字列が閉じられていない", quote.as_char())
+                    format!("unterminated `{}` quoted argument", quote.as_char())
                 }
-                None => "クォートが閉じられていない".to_string(),
+                None => "unterminated quoted argument".to_string(),
             },
             UnterminatedBlock => match self.block_ctx() {
                 Some((name_span, _)) => {
                     let name = Self::source_text(source, name_span);
-                    format!("`{name}` ブロックが閉じられていない")
+                    format!("unterminated `{name}` block")
                 }
-                None => "ブロックが閉じられていない".to_string(),
+                None => "unterminated block".to_string(),
             },
-            UnmatchedCloseBrace => "対応する `{` のない `}` がある".to_string(),
-            MissingDirectiveName => "ディレクティブ名が必要".to_string(),
+            UnmatchedCloseBrace => "unmatched closing brace".to_string(),
+            MissingDirectiveName => "expected adirective name".to_string(),
 
-            MissingTerminator => "`;` または `{` が必要".to_string(),
+            MissingTerminator => "expected a directive terminator".to_string(),
             Unexpected => {
-                format!("予期しない文字 `{}`", self.found.unwrap())
+                format!("unexpected character `{}`", self.found.unwrap())
             }
-            UnexpectedEof => "入力が途中で終わっている".to_string(),
+            UnexpectedEof => "unexpected end of input".to_string(),
         }
     }
 
@@ -113,7 +111,7 @@ impl SyntaxError {
             .any(|ctx| matches!(ctx, ParseContext::Expected(Expected::ClosingQuote(_))))
     }
 
-    pub(crate) fn block_ctx(&self) -> Option<(&Span, &Span)> {
+    pub fn block_ctx(&self) -> Option<(&Span, &Span)> {
         self.contexts.iter().find_map(|ctx| match ctx {
             ParseContext::InBlock {
                 name_span,
@@ -123,7 +121,7 @@ impl SyntaxError {
         })
     }
 
-    pub(crate) fn quoted_arg_ctx(&self) -> Option<(QuoteKind, &Span)> {
+    pub fn quoted_arg_ctx(&self) -> Option<(QuoteKind, &Span)> {
         self.contexts.iter().find_map(|ctx| match ctx {
             ParseContext::InQuotedArgument {
                 quote,
@@ -147,7 +145,7 @@ impl SyntaxError {
             if let Some((quote, open_quote_span)) = self.quoted_arg_ctx() {
                 labels.push(
                     Label::secondary(file_id, open_quote_span.clone()).with_message(format!(
-                        "この `{}` から文字列が始まっている",
+                        "quoted argument starts with `{}` here",
                         quote.as_char()
                     )),
                 );
@@ -159,7 +157,7 @@ impl SyntaxError {
                 let name = Self::source_text(source, name_span);
                 labels.push(
                     Label::secondary(file_id, open_brace_span.clone())
-                        .with_message(format!("`{name}` ブロックはここで開始した")),
+                        .with_message(format!("`{name}` block starts here")),
                 );
             }
         }
@@ -167,24 +165,37 @@ impl SyntaxError {
         Diagnostic::error()
             .with_message(self.message(source))
             .with_labels(labels)
+            .with_notes(self.notes())
     }
 
     fn primary_label_message(&self) -> String {
         use ErrorKind::*;
         match self.kind() {
             InvalidEscape => {
-                format!("`{}` はここではエスケープできない", self.found.unwrap())
+                format!("`{}` cannot be escaped", self.found.unwrap())
             }
-            UnterminatedEscape => "エスケープする文字が必要".to_string(),
-            UnterminatedQuote => "ここに閉じクォートが必要".to_string(),
-            UnterminatedBlock => "ここに `}` が必要".to_string(),
-            UnmatchedCloseBrace => "この `}` に対応する `{` がない".to_string(),
-            MissingDirectiveName => "ここにディレクティブ名が必要".to_string(),
-            MissingTerminator => {
-                "ディレクティブを `;` で終えるか `{` でブロックを始める".to_string()
+            UnterminatedEscape => "expected a character to escape".to_string(),
+            UnterminatedQuote => "expected closing `{quote}`".to_string(),
+            UnterminatedBlock => "expected `}`".to_string(),
+            UnmatchedCloseBrace => "this `}` has no matching '{'".to_string(),
+            MissingDirectiveName => "expected a directive name here".to_string(),
+            MissingTerminator => "end the directive with `;` or start a block with `{`".to_string(),
+            Unexpected => "unexpected input".to_string(),
+            UnexpectedEof => "input ends here".to_string(),
+        }
+    }
+
+    fn notes(&self) -> Vec<String> {
+        use ErrorKind::*;
+
+        match self.kind() {
+            MissingDirectiveName if self.found == Some(';') => {
+                vec!["a semicolon can only terminate a simple directive".to_string()]
             }
-            Unexpected => "予期しない入力".to_string(),
-            UnexpectedEof => "ここで入力が終わっている".to_string(),
+            InvalidEscape | UnterminatedEscape => {
+                vec!["only the opening quote and `\\` can be escaped".to_string()]
+            }
+            _ => Vec::new(),
         }
     }
 }
