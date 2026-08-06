@@ -10,12 +10,19 @@ pub mod context;
 
 #[derive(Clone, Copy)]
 enum ErrorKind {
+    /// Example: `"foo\q";`
     InvalidEscape,
+    /// Example: `"foo\"`
     UnterminatedEscape,
+    /// Example: `foo`
     UnterminatedQuote,
+    /// Example: `foo {`
     UnterminatedBlock,
+    /// Example: `foo; }`
     UnmatchedCloseBrace,
+    /// Example: `foo {};`
     MissingDirectiveName,
+    /// Example: `foo 10\nbar 20;`
     MissingTerminator,
     Unexpected,
     UnexpectedEof,
@@ -55,12 +62,19 @@ impl SyntaxError {
         use ErrorKind::*;
         use Expected::*;
         match self.found {
+            // "foo\q";
             Some(_) if self.expects(EscapeSequence) => InvalidEscape,
+            // "foo\"
             None if self.expects(EscapeSequence) => UnterminatedEscape,
+            // "foo
             None if self.expects_closing_quote() => UnterminatedQuote,
+            // foo {
             None if self.expects(ClosingBrace) => UnterminatedBlock,
+            // foo; }
             Some('}') if self.expects(DirectiveName) => UnmatchedCloseBrace,
+            // foo {};
             _ if self.expects(DirectiveName) => MissingDirectiveName,
+            // foo 10\nbar 20;
             _ if self.expects(DirectiveTerminator) => MissingTerminator,
             Some(_) => Unexpected,
             None => UnexpectedEof,
@@ -86,8 +100,7 @@ impl SyntaxError {
                 None => "unterminated block".to_string(),
             },
             UnmatchedCloseBrace => "unmatched closing brace".to_string(),
-            MissingDirectiveName => "expected adirective name".to_string(),
-
+            MissingDirectiveName => "expected a directive name".to_string(),
             MissingTerminator => "expected a directive terminator".to_string(),
             Unexpected => {
                 format!("unexpected character `{}`", self.found.unwrap())
