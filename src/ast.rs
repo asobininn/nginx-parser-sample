@@ -49,17 +49,17 @@ pub struct ConfigAst<'s> {
 
 impl<'s> ConfigAst<'s> {
     pub fn link_parents(&mut self) {
-        for root in self.roots.clone() {
-            self.link_children(root);
-        }
-    }
+        let mut queue: Vec<(DirectiveId<'s>, Option<DirectiveId<'s>>)> =
+            self.roots.iter().map(|&id| (id, None)).collect();
 
-    fn link_children(&mut self, id: DirectiveId<'s>) {
-        if let DirectiveKind::Block { children, .. } = &self.directives[id].kind {
-            for child in children.clone() {
-                self.directives[child].parent = Some(id);
-                self.link_children(child);
+        let mut i = 0;
+        while i < queue.len() {
+            let (id, parent) = queue[i];
+            self.directives[id].parent = parent;
+            if let DirectiveKind::Block { children, .. } = &self.directives[id].kind {
+                queue.extend(children.iter().map(|&c| (c, Some(id))));
             }
+            i += 1;
         }
     }
 }
