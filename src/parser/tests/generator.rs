@@ -6,18 +6,20 @@ use proptest::prelude::*;
 pub(crate) struct Generated {
     pub(crate) source: String,
     pub(crate) mutation_sites: Vec<MutationSite>,
+    pub(crate) directive_count: usize,
 }
 
 impl Generated {
-    fn new(source: String, mutation_sites: Vec<MutationSite>) -> Self {
+    fn new(source: String, mutation_sites: Vec<MutationSite>, directive_count: usize) -> Self {
         Self {
             source,
             mutation_sites,
+            directive_count,
         }
     }
 
     fn plain(source: String) -> Self {
-        Self::new(source, Vec::new())
+        Self::new(source, Vec::new(), 0)
     }
 
     fn push_str(&mut self, source: &str) {
@@ -41,6 +43,7 @@ impl Generated {
         }
         self.source.push_str(&other.source);
         self.mutation_sites.extend(other.mutation_sites);
+        self.directive_count += other.directive_count;
     }
 }
 
@@ -160,6 +163,7 @@ fn directive() -> impl Strategy<Value = Generated> {
                     block.push_str(&ws);
                 }
                 block.push_mutable('}', MutationKind::ClosingBrace);
+                block.directive_count += 1;
                 block
             })
     })
@@ -169,6 +173,7 @@ fn simple_directive() -> impl Strategy<Value = Generated> {
     (directive_header(), hws0()).prop_map(|(mut generator, ws)| {
         generator.push_str(&ws);
         generator.push_mutable(';', MutationKind::Semicolon);
+        generator.directive_count += 1;
         generator
     })
 }
