@@ -7,7 +7,7 @@ use la_arena::Arena;
 use winnow::{
     LocatingSlice, ModalResult, Parser, Stateful,
     ascii::{escaped, multispace1},
-    combinator::{alt, cut_err, eof, fail, peek, preceded, repeat, terminated},
+    combinator::{alt, cut_err, eof, fail, not, peek, preceded, repeat, terminated},
     error::{AddContext, ContextError, ParserError},
     seq,
     stream::Location,
@@ -216,8 +216,9 @@ fn quoted_with<'s>(quote: char, input: &mut Input<'s>) -> PResult<Arg<'s>> {
 }
 
 fn bare_arg<'s>(input: &mut Input<'s>) -> PResult<Arg<'s>> {
+    not(peek('#')).parse_next(input)?;
     take_while(1.., |c: char| {
-        !c.is_ascii_whitespace() && !matches!(c, ';' | '{' | '}' | '"' | '\'' | '#')
+        !c.is_ascii_whitespace() && !matches!(c, ';' | '{' | '}' | '"' | '\'')
     })
     .with_span()
     .map(|(value, span)| Arg {

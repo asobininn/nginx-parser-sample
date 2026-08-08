@@ -231,10 +231,9 @@ fn quoted_inner(quote: char) -> impl Strategy<Value = String> {
 
 fn bare_arg() -> impl Strategy<Value = String> {
     prop_oneof![
-        8 => "[a-zA-Z0-9_./:-]{1,10}",
+        8 => ("[a-zA-Z0-9_./:-]", "[a-zA-Z0-9_./#:-]{0,9}").prop_map(|(head, tail)| format!("{head}{tail}")),
         1 => "[　\u{3040}-\u{309f}\u{4E00}-\u{9FFF}]{1,10}"
     ]
-    
 }
 
 fn hws0() -> impl Strategy<Value = String> {
