@@ -11,7 +11,7 @@ use winnow::{
     error::{AddContext, ContextError, ParserError},
     seq,
     stream::Location,
-    token::take_while,
+    token::{any, take_while},
 };
 
 use crate::{
@@ -195,8 +195,7 @@ fn quoted_with<'s>(quote: char, input: &mut Input<'s>) -> PResult<Arg<'s>> {
         escaped(
             take_while(1.., |c: char| c != '\\' && c != quote),
             '\\',
-            alt(('\\'.value('\\'), quote.value(quote)))
-                .context(ParseContext::Expected(Expected::EscapeSequence)),
+            escaped_char,
         ),
         quote.context(ParseContext::Expected(Expected::ClosingQuote(
             quote_kind.clone(),
@@ -213,6 +212,19 @@ fn quoted_with<'s>(quote: char, input: &mut Input<'s>) -> PResult<Arg<'s>> {
         value: Cow::Owned(value),
         span: start..end,
     })
+}
+
+fn escaped_char<'s>(input: &mut Input<'s>) -> PResult<String> {
+    any.map(|c| match c {
+        '\\' => "\\".to_string(),
+        '"' => "\"".to_string(),
+        '\'' => "'".to_string(),
+        't' => "\t".to_string(),
+        'r' => "\r".to_string(),
+        'n' => "\n".to_string(),
+        other => format!("\\{other}"),
+    })
+    .parse_next(input)
 }
 
 fn bare_arg<'s>(input: &mut Input<'s>) -> PResult<Arg<'s>> {

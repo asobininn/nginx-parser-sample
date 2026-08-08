@@ -27,7 +27,6 @@ pub enum Expected {
     DirectiveTerminator,
     ClosingBrace,
     ClosingQuote(QuoteKind),
-    EscapeSequence,
 }
 
 #[derive(Debug, Clone, PartialEq)]

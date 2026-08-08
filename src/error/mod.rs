@@ -10,10 +10,6 @@ pub mod context;
 
 #[derive(Clone, Copy)]
 enum ErrorKind {
-    /// Example: `"foo\q";`
-    InvalidEscape,
-    /// Example: `"foo\"`
-    UnterminatedEscape,
     /// Example: `foo`
     UnterminatedQuote,
     /// Example: `foo {`
@@ -62,10 +58,6 @@ impl SyntaxError {
         use ErrorKind::*;
         use Expected::*;
         match self.found {
-            // "foo\q";
-            Some(_) if self.expects(EscapeSequence) => InvalidEscape,
-            // "foo\"
-            None if self.expects(EscapeSequence) => UnterminatedEscape,
             // "foo
             None if self.expects_closing_quote() => UnterminatedQuote,
             // foo {
@@ -84,8 +76,6 @@ impl SyntaxError {
     pub fn message(&self, source: &str) -> String {
         use ErrorKind::*;
         match self.kind() {
-            InvalidEscape => "invalid escape sequence".to_string(),
-            UnterminatedEscape => "unterminated escape sequence".to_string(),
             UnterminatedQuote => match self.quoted_arg_ctx() {
                 Some((quote, _)) => {
                     format!("unterminated `{}` quoted argument", quote.as_char())
@@ -154,7 +144,7 @@ impl SyntaxError {
         ];
 
         // クォート開始位置を補助表示する
-        if self.expects_closing_quote() || self.expects(Expected::EscapeSequence) {
+        if self.expects_closing_quote() {
             if let Some((quote, open_quote_span)) = self.quoted_arg_ctx() {
                 labels.push(
                     Label::secondary(file_id, open_quote_span.clone()).with_message(format!(
@@ -184,10 +174,6 @@ impl SyntaxError {
     fn primary_label_message(&self) -> String {
         use ErrorKind::*;
         match self.kind() {
-            InvalidEscape => {
-                format!("`{}` cannot be escaped", self.found.unwrap())
-            }
-            UnterminatedEscape => "expected a character to escape".to_string(),
             UnterminatedQuote => "expected closing `{quote}`".to_string(),
             UnterminatedBlock => "expected `}`".to_string(),
             UnmatchedCloseBrace => "this `}` has no matching '{'".to_string(),
@@ -204,9 +190,6 @@ impl SyntaxError {
         match self.kind() {
             MissingDirectiveName if self.found == Some(';') => {
                 vec!["a semicolon can only terminate a simple directive".to_string()]
-            }
-            InvalidEscape | UnterminatedEscape => {
-                vec!["only the opening quote and `\\` can be escaped".to_string()]
             }
             _ => Vec::new(),
         }
