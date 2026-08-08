@@ -88,7 +88,7 @@ fn directives<'s>(input: &mut Input<'s>) -> PResult<Vec<DirectiveId<'s>>> {
 fn directive<'s>(input: &mut Input<'s>) -> PResult<DirectiveId<'s>> {
     let start = input.current_token_start();
     let header = directive_header.parse_next(input)?;
-    hws0.parse_next(input)?;
+    ws0.parse_next(input)?;
 
     match peek(winnow::token::any::<Input<'s>, ParseContextError>).parse_next(input) {
         Ok('{') => cut_err(block_body(header, start)).parse_next(input),
@@ -156,7 +156,7 @@ fn simple_body<'s>(
 }
 
 fn directive_header<'s>(input: &mut Input<'s>) -> PResult<DirectiveHeader<'s>> {
-    seq!(directive_name, repeat(0.., preceded(hws1, arg)),)
+    seq!(directive_name, repeat(0.., preceded(ws1, arg)),)
         .with_span()
         .map(|((name, args), span)| DirectiveHeader {
             name: name.0,
@@ -234,16 +234,8 @@ fn line_comment(input: &mut Input<'_>) -> PResult<()> {
         .parse_next(input)
 }
 
-fn hws0(input: &mut Input<'_>) -> PResult<()> {
-    take_while(0.., |c: char| matches!(c, ' ' | '\t'))
-        .void()
-        .parse_next(input)
-}
-
-fn hws1(input: &mut Input<'_>) -> PResult<()> {
-    take_while(1.., |c: char| matches!(c, ' ' | '\t'))
-        .void()
-        .parse_next(input)
+fn ws1(input: &mut Input<'_>) -> PResult<()> {
+    repeat(1.., alt((multispace1.void(), line_comment))).parse_next(input)
 }
 
 fn ws0(input: &mut Input<'_>) -> PResult<()> {

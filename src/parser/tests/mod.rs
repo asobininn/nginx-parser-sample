@@ -33,6 +33,10 @@ fn is_expected_error_for(kind: MutationKind, error: &SyntaxError) -> bool {
     }
 }
 
+fn visible(source: &str) -> String {
+    source.replace('\r', "␍").replace('\t', "⇥")
+}
+
 proptest! {
     #[test]
     fn generated_config_can_be_parsed(generated in config()) {
@@ -42,16 +46,17 @@ proptest! {
                 prop_assert_eq!(ast.directives.len(), generated.directive_count,
                     "parsed directive count does not match generated directive count\n\n
                     --- source---\n\
-                    {}\n", source
+                    {}\n", visible(&source)
                 );
             }
             Err(error) => {
                 prop_assert!(false,
                     "generated config failed to parse\n\n\
                     --- source ---\n\
-                    {source}\n\
+                    {}\n\
                     --- error ---\n\
-                    {error:#?}\n"
+                    {error:#?}\n",
+                    visible(&source),
                 );
             }
         }
@@ -71,7 +76,7 @@ proptest! {
                 {}\n",
                 site.span,
                 generated.source.len(),
-                generated.source,
+                visible(&generated.source),
             );
         }
     }
@@ -87,7 +92,7 @@ proptest! {
             {}\n\
             --- mutated source ---\n\
             {}\n",
-            case.site.kind, case.original, case.source
+            case.site.kind, visible(&case.original), visible(&case.source)
         );
         let error = res.unwrap_err();
         prop_assert!(
@@ -100,7 +105,7 @@ proptest! {
             --- actual error --- \n\
             {error:#?}",
             case.site.kind,
-            case.source,
+            visible(&case.source),
         );
     }
 }

@@ -45,17 +45,31 @@ impl Generated {
         self.mutation_sites.extend(other.mutation_sites);
         self.directive_count += other.directive_count;
     }
+
+    fn mark_trialling_semicolon(&mut self) {
+        let Some(site) = self.mutation_sites.last_mut() else {
+            return;
+        };
+        if matches!(site.kind, MutationKind::Semicolon) {
+            site.must_reject = true;
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct MutationSite {
     pub(crate) span: Range<usize>,
     pub(crate) kind: MutationKind,
+    pub(crate) must_reject: bool,
 }
 
 impl MutationSite {
     fn new(span: Range<usize>, kind: MutationKind) -> Self {
-        MutationSite { span, kind }
+        MutationSite {
+            span,
+            kind,
+            must_reject: false,
+        }
     }
 }
 
@@ -121,6 +135,7 @@ fn apply_mutation(source: &mut String, site: &MutationSite) {
 
 fn can_mutate(generated: &Generated, site: &MutationSite) -> bool {
     match site.kind {
+        MutationKind::Semicolon => site.must_reject,
         MutationKind::ClosingQuote(quote) => !generated.mutation_sites.iter().any(|later| {
             later.span.start >= site.span.end
                 && matches!(
@@ -141,6 +156,7 @@ pub(crate) fn config() -> impl Strategy<Value = Generated> {
             .fold(Generated::plain(leading), |mut config, (directive, ws)| {
                 config.append(directive);
                 config.push_str(&ws);
+                config.mark_trialling_semicolon();
                 config
             })
     })
@@ -150,7 +166,7 @@ fn directive() -> impl Strategy<Value = Generated> {
     simple_directive().prop_recursive(4, 64, 4, |directive| {
         (
             directive_header(),
-            hws0(),
+            ws0(),
             ws0(),
             prop::collection::vec((directive, ws0()), 0..4),
         )
@@ -162,6 +178,7 @@ fn directive() -> impl Strategy<Value = Generated> {
                     block.append(child);
                     block.push_str(&ws);
                 }
+                block.mark_trialling_semicolon();
                 block.push_mutable('}', MutationKind::ClosingBrace);
                 block.directive_count += 1;
                 block
@@ -170,7 +187,7 @@ fn directive() -> impl Strategy<Value = Generated> {
 }
 
 fn simple_directive() -> impl Strategy<Value = Generated> {
-    (directive_header(), hws0()).prop_map(|(mut generator, ws)| {
+    (directive_header(), ws0()).prop_map(|(mut generator, ws)| {
         generator.push_str(&ws);
         generator.push_mutable(';', MutationKind::Semicolon);
         generator.directive_count += 1;
@@ -181,7 +198,7 @@ fn simple_directive() -> impl Strategy<Value = Generated> {
 fn directive_header() -> impl Strategy<Value = Generated> {
     (
         directive_name(),
-        prop::collection::vec((hws1(), arg()), 0..5),
+        prop::collection::vec((ws1(), arg()), 0..5),
     )
         .prop_map(|(name, args)| {
             args.into_iter()
@@ -236,21 +253,21 @@ fn bare_arg() -> impl Strategy<Value = String> {
     ]
 }
 
-fn hws0() -> impl Strategy<Value = String> {
-    "[ \t]{0,3}"
-}
-
-fn hws1() -> impl Strategy<Value = String> {
-    "[ \t]{1,3}"
-}
-
 fn ws0() -> impl Strategy<Value = String> {
+    ws_n(0)
+}
+
+fn ws1() -> impl Strategy<Value = String> {
+    ws_n(1)
+}
+
+fn ws_n(min: usize) -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
             5 => "[ \t\r\n]{1,4}",
             1 => "[a-zA-Z0-9 _./:-]{0,12}".prop_map(|comment| format!("#{comment}\n"))
         ],
-        0..4,
+        min..(min + 4),
     )
     .prop_map(|parts| parts.concat())
 }
