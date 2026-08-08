@@ -220,6 +220,7 @@ fn quoted_inner(quote: char) -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
             8 => "[a-zA-Z0-9 _./:-]{1,4}",
+            1 => "[　\u{3040}-\u{309f}\u{4E00}-\u{9FFF}]{1,10}",
             1 => Just(r#"\\"#.to_string()),
             1 => Just(format!("\\{quote}")),
         ],
@@ -229,7 +230,11 @@ fn quoted_inner(quote: char) -> impl Strategy<Value = String> {
 }
 
 fn bare_arg() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9_./:-]{1,10}"
+    prop_oneof![
+        8 => "[a-zA-Z0-9_./:-]{1,10}",
+        1 => "[　\u{3040}-\u{309f}\u{4E00}-\u{9FFF}]{1,10}"
+    ]
+    
 }
 
 fn hws0() -> impl Strategy<Value = String> {

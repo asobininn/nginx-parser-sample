@@ -217,7 +217,7 @@ fn quoted_with<'s>(quote: char, input: &mut Input<'s>) -> PResult<Arg<'s>> {
 
 fn bare_arg<'s>(input: &mut Input<'s>) -> PResult<Arg<'s>> {
     take_while(1.., |c: char| {
-        !c.is_whitespace() && !matches!(c, ';' | '{' | '}' | '"' | '\'' | '#')
+        !c.is_ascii_whitespace() && !matches!(c, ';' | '{' | '}' | '"' | '\'' | '#')
     })
     .with_span()
     .map(|(value, span)| Arg {
