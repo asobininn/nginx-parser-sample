@@ -11,7 +11,7 @@ use winnow::{
     error::{AddContext, ContextError, ParserError},
     seq,
     stream::Location,
-    token::{any, take_while},
+    token::{any, one_of, take_while},
 };
 
 use crate::{
@@ -228,16 +228,59 @@ fn escaped_char<'s>(input: &mut Input<'s>) -> PResult<String> {
 }
 
 fn bare_arg<'s>(input: &mut Input<'s>) -> PResult<Arg<'s>> {
-    not(peek('#')).parse_next(input)?;
-    take_while(1.., |c: char| {
-        !c.is_ascii_whitespace() && !matches!(c, ';' | '{' | '}' | '"' | '\'')
-    })
+    not(peek(one_of(['#', '}', '"', '\'']))).parse_next(input)?;
+    repeat(
+        1..,
+        alt((
+            ('\\', any).void(),
+            "${".void(),
+            '$'.void(),
+            take_while(1.., |c: char| {
+                !matches!(c, '\\' | '$' | '{' | ';' | ' ' | '\t' | '\r' | '\n')
+            })
+            .void(),
+        )),
+    )
+    .map(|()| ())
+    .take()
     .with_span()
-    .map(|(value, span)| Arg {
-        value: Cow::Borrowed(value),
+    .map(|(raw, span)| Arg {
+        value: unescape_nginx(raw),
         span,
     })
     .parse_next(input)
+}
+
+fn unescape_nginx(source: &str) -> Cow<'_, str> {
+    if !source.contains('\\') {
+        return Cow::Borrowed(source);
+    }
+    let mut output = String::with_capacity(source.len());
+    let mut chars = source.chars();
+
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            output.push(c);
+            continue;
+        }
+        let Some(escaped) = chars.next() else {
+            output.push('\\');
+            break;
+        };
+        match escaped {
+            '"' => output.push('"'),
+            '\'' => output.push('\''),
+            '\\' => output.push('\\'),
+            't' => output.push('\t'),
+            'r' => output.push('\r'),
+            'n' => output.push('\n'),
+            other => {
+                output.push('\\');
+                output.push(other);
+            }
+        }
+    }
+    Cow::Owned(output)
 }
 
 fn line_comment(input: &mut Input<'_>) -> PResult<()> {

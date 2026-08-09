@@ -1,151 +1,30 @@
-use std::ops::Range;
-
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Generated {
     pub(crate) source: String,
-    pub(crate) mutation_sites: Vec<MutationSite>,
     pub(crate) directive_count: usize,
 }
 
 impl Generated {
-    fn new(source: String, mutation_sites: Vec<MutationSite>, directive_count: usize) -> Self {
+    fn new(source: String, directive_count: usize) -> Self {
         Self {
             source,
-            mutation_sites,
             directive_count,
         }
     }
 
     fn plain(source: String) -> Self {
-        Self::new(source, Vec::new(), 0)
+        Self::new(source, 0)
     }
 
     fn push_str(&mut self, source: &str) {
         self.source.push_str(source);
     }
 
-    fn push_mutable(&mut self, token: char, kind: MutationKind) {
-        let start = self.source.len();
-        self.source.push(token);
-
-        self.mutation_sites
-            .push(MutationSite::new(start..self.source.len(), kind));
-    }
-
-    fn append(&mut self, mut other: Generated) {
-        let offset = self.source.len();
-
-        for site in &mut other.mutation_sites {
-            site.span.start += offset;
-            site.span.end += offset;
-        }
+    fn append(&mut self, other: Generated) {
         self.source.push_str(&other.source);
-        self.mutation_sites.extend(other.mutation_sites);
         self.directive_count += other.directive_count;
-    }
-
-    fn mark_trialling_semicolon(&mut self) {
-        let Some(site) = self.mutation_sites.last_mut() else {
-            return;
-        };
-        if matches!(site.kind, MutationKind::Semicolon) {
-            site.must_reject = true;
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct MutationSite {
-    pub(crate) span: Range<usize>,
-    pub(crate) kind: MutationKind,
-    pub(crate) must_reject: bool,
-}
-
-impl MutationSite {
-    fn new(span: Range<usize>, kind: MutationKind) -> Self {
-        MutationSite {
-            span,
-            kind,
-            must_reject: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum MutationKind {
-    Semicolon,
-    OpeningBrace,
-    ClosingBrace,
-    OpeningQuote(char),
-    ClosingQuote(char),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Mutated {
-    pub(crate) original: String,
-    pub(crate) source: String,
-    pub(crate) site: MutationSite,
-}
-
-pub(crate) fn mutated_config() -> impl Strategy<Value = Mutated> {
-    config()
-        .prop_map(|generated| {
-            let candidates = generated
-                .mutation_sites
-                .iter()
-                .filter(|site| can_mutate(&generated, site))
-                .cloned()
-                .collect::<Vec<_>>();
-            (generated, candidates)
-        })
-        .prop_filter(
-            "config must contain an applicable mutation site",
-            |(_, canadidates)| !canadidates.is_empty(),
-        )
-        .prop_flat_map(|(generated, candidates)| {
-            let candidate_count = candidates.len();
-            (Just(generated), Just(candidates), 0..candidate_count).prop_map(
-                |(generated, candidates, idx)| {
-                    let site = candidates[idx].clone();
-                    let mut source = generated.source.clone();
-                    apply_mutation(&mut source, &site);
-                    Mutated {
-                        original: generated.source,
-                        source,
-                        site,
-                    }
-                },
-            )
-        })
-}
-
-fn apply_mutation(source: &mut String, site: &MutationSite) {
-    match site.kind {
-        MutationKind::Semicolon => source.replace_range(site.span.clone(), "\n"),
-        MutationKind::OpeningBrace
-        | MutationKind::ClosingBrace
-        | MutationKind::OpeningQuote(_)
-        | MutationKind::ClosingQuote(_) => {
-            source.replace_range(site.span.clone(), "");
-        }
-    }
-}
-
-fn can_mutate(generated: &Generated, site: &MutationSite) -> bool {
-    match site.kind {
-        MutationKind::Semicolon => site.must_reject,
-        MutationKind::ClosingQuote(quote) => !generated.mutation_sites.iter().any(|later| {
-            later.span.start >= site.span.end
-                && matches!(
-                    later.kind,
-                    MutationKind::OpeningQuote(later_quote)
-                        | MutationKind::ClosingQuote(later_quote)
-                        if later_quote == quote
-                )
-        }),
-        _ => true,
     }
 }
 
@@ -156,7 +35,6 @@ pub(crate) fn config() -> impl Strategy<Value = Generated> {
             .fold(Generated::plain(leading), |mut config, (directive, ws)| {
                 config.append(directive);
                 config.push_str(&ws);
-                config.mark_trialling_semicolon();
                 config
             })
     })
@@ -171,15 +49,12 @@ fn directive() -> impl Strategy<Value = Generated> {
             prop::collection::vec((directive, ws0()), 0..4),
         )
             .prop_map(|(mut block, before_brace, after_brace, children)| {
-                block.push_str(&before_brace);
-                block.push_mutable('{', MutationKind::OpeningBrace);
-                block.push_str(&after_brace);
+                block.push_str(&format!("{before_brace}{{{after_brace}"));
                 for (child, ws) in children {
                     block.append(child);
                     block.push_str(&ws);
                 }
-                block.mark_trialling_semicolon();
-                block.push_mutable('}', MutationKind::ClosingBrace);
+                block.push_str("}");
                 block.directive_count += 1;
                 block
             })
@@ -189,7 +64,7 @@ fn directive() -> impl Strategy<Value = Generated> {
 fn simple_directive() -> impl Strategy<Value = Generated> {
     (directive_header(), ws0()).prop_map(|(mut generator, ws)| {
         generator.push_str(&ws);
-        generator.push_mutable(';', MutationKind::Semicolon);
+        generator.push_str(";");
         generator.directive_count += 1;
         generator
     })
@@ -225,9 +100,7 @@ fn quoted_arg() -> impl Strategy<Value = Generated> {
     prop_oneof![Just('\''), Just('"')].prop_flat_map(|quote| {
         quoted_inner(quote).prop_map(move |inner| {
             let mut generated = Generated::plain(String::new());
-            generated.push_mutable(quote, MutationKind::OpeningQuote(quote));
-            generated.push_str(&inner);
-            generated.push_mutable(quote, MutationKind::ClosingQuote(quote));
+            generated.push_str(&format!("{quote}{inner}{quote}"));
             generated
         })
     })
@@ -236,9 +109,10 @@ fn quoted_arg() -> impl Strategy<Value = Generated> {
 fn quoted_inner(quote: char) -> impl Strategy<Value = String> {
     prop::collection::vec(
         prop_oneof![
-            8 => "[a-zA-Z0-9 _./:-]{1,4}",
+            8 => "[a-zA-Z0-9 _./:#{};-]{1,4}",
             1 => "[　\u{3040}-\u{309f}\u{4E00}-\u{9FFF}]{1,10}",
-            1 => Just(r#"\\"#.to_string()),
+            2 => escape_sequence(),
+            1 => "[a-zA-Z]{0,6}".prop_map(|var| format!("${{{var}}}")),
             1 => Just(format!("\\{quote}")),
         ],
         0..5,
@@ -246,9 +120,27 @@ fn quoted_inner(quote: char) -> impl Strategy<Value = String> {
     .prop_map(|parts| parts.concat())
 }
 
+fn escape_sequence() -> impl Strategy<Value = String> {
+    prop_oneof![
+        Just('\\'),
+        Just('"'),
+        Just('\''),
+        Just('t'),
+        Just('r'),
+        Just('r'),
+        Just('n'),
+        Just('q'),
+    ]
+    .prop_map(|c| format!("\\{c}"))
+}
+
 fn bare_arg() -> impl Strategy<Value = String> {
     prop_oneof![
-        8 => ("[a-zA-Z0-9_./:-]", "[a-zA-Z0-9_./#:-]{0,9}").prop_map(|(head, tail)| format!("{head}{tail}")),
+        8 => (
+            "[a-zA-Z0-9_./:-]",
+             "[a-zA-Z0-9_./#}'\":-]{0,9}"
+        ).prop_map(|(head, tail)| format!("{head}{tail}")),
+        1 => "[a-zA-Z]{0,6}".prop_map(|var| format!("${{{var}}}")),
         1 => "[　\u{3040}-\u{309f}\u{4E00}-\u{9FFF}]{1,10}"
     ]
 }
